@@ -84,10 +84,12 @@ func main() {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{
 		"Container",
-		"host start",
-		"host end",
+		"parent start",
+		"parent end",
 		"container start",
-		"container end"})
+		"container end",
+		"host start",
+		"host end"})
 	table.AppendBulk(data)
 	table.Render()
 
@@ -95,12 +97,16 @@ func main() {
 }
 
 type container struct {
-	name   string
-	mapset *shared.IdmapSet
+	idmap   *shared.IdmapSet
+	// for nested containers, the true host min/max
+	hostmin int
+	hostmax int
 }
 
-func ParseFile(fName string) ([]container, error) {
-	set := []container{}
+type containers map[string]container
+
+func ParseFile(fName string) (containers, error) {
+	set := containers{}
 	file, err := os.Open(fName)
 	if err != nil {
 		return set, err
@@ -118,13 +124,40 @@ func ParseFile(fName string) ([]container, error) {
 		if err != nil {
 			return set, err
 		}
-		c := container{name: s[0], mapset: &m}
-		set = append(set, c)
+		c := container{idmap: &m, hostmin: -1, hostmax: -1}
+		set[s[0]] = c
 	}
 
 	return set, nil
 }
 
-func Process(containers []container) ([][]string, error) {
-	return [][]string{}, fmt.Errorf("Process function not implemented")
+func Process(containers containers) ([][]string, error) {
+	result := [][]string{}
+
+	for name, c := range containers {
+		// note - we only do cases where uid+gid are the same, so just
+		// take the first idmap
+		idmap := c.idmap
+		r := idmap.Idmap[0].Maprange
+		pstart := fmt.Sprintf("%d", idmap.Idmap[0].Hostid)
+		pend   := fmt.Sprintf("%d", idmap.Idmap[0].Hostid + r)
+		cstart := fmt.Sprintf("%d", idmap.Idmap[0].Nsid)
+		cend   := fmt.Sprintf("%d", idmap.Idmap[0].Nsid + r)
+		v1, v2, err := verifyRange(name, idmap.Idmap[0], containers)
+		if err != nil {
+			return result, err
+		}
+		c.hostmin = v1
+		c.hostmax = v2
+		hstart := fmt.Sprintf("%d", v1)
+		hend   := fmt.Sprintf("%d", v2)
+		newstr := []string{name, pstart, pend, cstart, cend, hstart, hend}
+		result = append(result, newstr)
+	}
+
+	return result, nil
+}
+
+func verifyRange(name string, idmap shared.IdmapEntry, c containers) (int, int, error) {
+	return idmap.Hostid, idmap.Hostid + idmap.Maprange, nil
 }
