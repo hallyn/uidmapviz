@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/lxc/lxd/shared"
 	"github.com/olekukonko/tablewriter"
@@ -97,8 +99,30 @@ type container struct {
 	mapset *shared.IdmapSet
 }
 
-func ParseFile(f string) ([]container, error) {
-	return []container{}, fmt.Errorf("To do : parse input files")
+func ParseFile(fName string) ([]container, error) {
+	set := []container{}
+	file, err := os.Open(fName)
+	if err != nil {
+		return set, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		// c1/c2 0:100000:65536
+		s := strings.Fields(scanner.Text())
+		if len(s) > 2 {
+			return set, fmt.Errorf("Too many fields")
+		}
+		mapstr := fmt.Sprintf("b:%s", s[1])
+		m, err := shared.IdmapSet{}.Append(mapstr)
+		if err != nil {
+			return set, err
+		}
+		c := container{name: s[0], mapset: &m}
+		set = append(set, c)
+	}
+
+	return set, nil
 }
 
 func Process(containers []container) ([][]string, error) {
