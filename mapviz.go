@@ -97,7 +97,7 @@ func main() {
 }
 
 type container struct {
-	idmap   *shared.IdmapSet
+	idmap *shared.IdmapSet
 	// for nested containers, the true host min/max
 	hostmin int
 	hostmax int
@@ -124,8 +124,13 @@ func ParseFile(fName string) (containers, error) {
 		if err != nil {
 			return set, err
 		}
-		c := container{idmap: &m, hostmin: -1, hostmax: -1}
-		set[s[0]] = c
+		name := s[0]
+		hostmin, hostmax, err := verifyRange(name, m.Idmap[0], set)
+		if err != nil {
+			return set, err
+		}
+		c := container{idmap: &m, hostmin: hostmin, hostmax: hostmax}
+		set[name] = c
 	}
 
 	return set, nil
@@ -137,20 +142,15 @@ func Process(containers containers) ([][]string, error) {
 	for name, c := range containers {
 		// note - we only do cases where uid+gid are the same, so just
 		// take the first idmap
+		fmt.Printf("Looking at %s\n", name)
 		idmap := c.idmap
 		r := idmap.Idmap[0].Maprange
 		pstart := fmt.Sprintf("%d", idmap.Idmap[0].Hostid)
-		pend   := fmt.Sprintf("%d", idmap.Idmap[0].Hostid + r)
+		pend := fmt.Sprintf("%d", idmap.Idmap[0].Hostid+r)
 		cstart := fmt.Sprintf("%d", idmap.Idmap[0].Nsid)
-		cend   := fmt.Sprintf("%d", idmap.Idmap[0].Nsid + r)
-		v1, v2, err := verifyRange(name, idmap.Idmap[0], containers)
-		if err != nil {
-			return result, err
-		}
-		c.hostmin = v1
-		c.hostmax = v2
-		hstart := fmt.Sprintf("%d", v1)
-		hend   := fmt.Sprintf("%d", v2)
+		cend := fmt.Sprintf("%d", idmap.Idmap[0].Nsid+r)
+		hstart := fmt.Sprintf("%d", c.hostmin)
+		hend := fmt.Sprintf("%d", c.hostmax)
 		newstr := []string{name, pstart, pend, cstart, cend, hstart, hend}
 		result = append(result, newstr)
 	}
@@ -159,5 +159,32 @@ func Process(containers containers) ([][]string, error) {
 }
 
 func verifyRange(name string, idmap shared.IdmapEntry, c containers) (int, int, error) {
-	return idmap.Hostid, idmap.Hostid + idmap.Maprange, nil
+	lineage := strings.Split(name, "/")
+	if len(lineage) == 1 {
+		return idmap.Hostid, idmap.Hostid + idmap.Maprange, nil
+	}
+	last := len(lineage) - 1
+	pname := strings.Join(lineage[0:last], "/")
+	parent, ok := c[pname]
+	if ! ok || parent.hostmin == -1 {
+		return 0, 0, fmt.Errorf("Parent for %s (%s) is undefined", name, pname)
+	}
+
+	pidmap := parent.idmap.Idmap[0]
+	if idmap.Nsid+idmap.Maprange >= pidmap.Nsid+pidmap.Maprange || idmap.Hostid < pidmap.Nsid {
+		return 0, 0, fmt.Errorf("Mapping for %s exceeds its parent's", name)
+	}
+
+	// make an idmap shifting the parent's mapping straight onto the host
+	absstr := fmt.Sprintf("b:%d:%d:%d", pidmap.Nsid, parent.hostmin, pidmap.Maprange)
+	m := shared.IdmapSet{}
+	m, err := m.Append(absstr)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// map the desired 'hostid' (which is really the parent-ns-id) onto the host
+	hoststart, _ := m.ShiftIntoNs(idmap.Hostid, idmap.Hostid)
+	hostend := hoststart + idmap.Maprange
+	return hoststart, hostend, nil
 }
