@@ -166,13 +166,14 @@ func verifyRange(name string, idmap shared.IdmapEntry, c containers) (int, int, 
 	last := len(lineage) - 1
 	pname := strings.Join(lineage[0:last], "/")
 	parent, ok := c[pname]
-	if ! ok || parent.hostmin == -1 {
+	if !ok || parent.hostmin == -1 {
 		return 0, 0, fmt.Errorf("Parent for %s (%s) is undefined", name, pname)
 	}
 
 	pidmap := parent.idmap.Idmap[0]
 	if idmap.Nsid+idmap.Maprange >= pidmap.Nsid+pidmap.Maprange || idmap.Hostid < pidmap.Nsid {
-		return 0, 0, fmt.Errorf("Mapping for %s exceeds its parent's", name)
+		return 0, 0, fmt.Errorf("Mapping for %s exceeds its parent's, parentids should be between %d - %d",
+			name, pidmap.Nsid, pidmap.Nsid+pidmap.Maprange-1)
 	}
 
 	// make an idmap shifting the parent's mapping straight onto the host
