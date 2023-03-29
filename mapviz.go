@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"os/user"
 	"path"
 	"strings"
 
-	"github.com/lxc/lxd/shared"
+	"github.com/lxc/lxd/shared/idmap"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -34,7 +35,12 @@ func isHelp(s string) bool {
 }
 
 func showDefaultMap() {
-	set, err := shared.DefaultIdmapSet()
+	u, err := user.Current()
+	if err != nil {
+		fmt.Printf("Error resolving current user")
+		help(1)
+	}
+	set, err := idmap.DefaultIdmapSet("", u.Username)
 	if err != nil {
 		fmt.Printf("Error reading default mapset: %q\n", err)
 		help(1)
@@ -97,10 +103,10 @@ func main() {
 }
 
 type container struct {
-	idmap *shared.IdmapSet
+	idmap *idmap.IdmapSet
 	// for nested containers, the true host min/max
-	hostmin int
-	hostmax int
+	hostmin int64
+	hostmax int64
 }
 
 type containers map[string]container
@@ -120,7 +126,7 @@ func ParseFile(fName string) (containers, error) {
 			return set, fmt.Errorf("Too many fields")
 		}
 		mapstr := fmt.Sprintf("b:%s", s[1])
-		m, err := shared.IdmapSet{}.Append(mapstr)
+		m, err := idmap.IdmapSet{}.Append(mapstr)
 		if err != nil {
 			return set, err
 		}
@@ -143,12 +149,12 @@ func Process(containers containers) ([][]string, error) {
 		// note - we only do cases where uid+gid are the same, so just
 		// take the first idmap
 		fmt.Printf("Looking at %s\n", name)
-		idmap := c.idmap
-		r := idmap.Idmap[0].Maprange
-		pstart := fmt.Sprintf("%d", idmap.Idmap[0].Hostid)
-		pend := fmt.Sprintf("%d", idmap.Idmap[0].Hostid+r)
-		cstart := fmt.Sprintf("%d", idmap.Idmap[0].Nsid)
-		cend := fmt.Sprintf("%d", idmap.Idmap[0].Nsid+r)
+		idMap := c.idmap
+		r := idMap.Idmap[0].Maprange
+		pstart := fmt.Sprintf("%d", idMap.Idmap[0].Hostid)
+		pend := fmt.Sprintf("%d", idMap.Idmap[0].Hostid+r)
+		cstart := fmt.Sprintf("%d", idMap.Idmap[0].Nsid)
+		cend := fmt.Sprintf("%d", idMap.Idmap[0].Nsid+r)
 		hstart := fmt.Sprintf("%d", c.hostmin)
 		hend := fmt.Sprintf("%d", c.hostmax)
 		newstr := []string{name, pstart, pend, cstart, cend, hstart, hend}
@@ -158,10 +164,10 @@ func Process(containers containers) ([][]string, error) {
 	return result, nil
 }
 
-func verifyRange(name string, idmap shared.IdmapEntry, c containers) (int, int, error) {
+func verifyRange(name string, idMap idmap.IdmapEntry, c containers) (int64, int64, error) {
 	lineage := strings.Split(name, "/")
 	if len(lineage) == 1 {
-		return idmap.Hostid, idmap.Hostid + idmap.Maprange, nil
+		return idMap.Hostid, idMap.Hostid + idMap.Maprange, nil
 	}
 	last := len(lineage) - 1
 	pname := strings.Join(lineage[0:last], "/")
@@ -171,21 +177,21 @@ func verifyRange(name string, idmap shared.IdmapEntry, c containers) (int, int, 
 	}
 
 	pidmap := parent.idmap.Idmap[0]
-	if idmap.Nsid+idmap.Maprange >= pidmap.Nsid+pidmap.Maprange || idmap.Hostid < pidmap.Nsid {
+	if idMap.Nsid+idMap.Maprange >= pidmap.Nsid+pidmap.Maprange || idMap.Hostid < pidmap.Nsid {
 		return 0, 0, fmt.Errorf("Mapping for %s exceeds its parent's, parentids should be between %d - %d",
 			name, pidmap.Nsid, pidmap.Nsid+pidmap.Maprange-1)
 	}
 
 	// make an idmap shifting the parent's mapping straight onto the host
 	absstr := fmt.Sprintf("b:%d:%d:%d", pidmap.Nsid, parent.hostmin, pidmap.Maprange)
-	m := shared.IdmapSet{}
+	m := idmap.IdmapSet{}
 	m, err := m.Append(absstr)
 	if err != nil {
 		return 0, 0, err
 	}
 
 	// map the desired 'hostid' (which is really the parent-ns-id) onto the host
-	hoststart, _ := m.ShiftIntoNs(idmap.Hostid, idmap.Hostid)
-	hostend := hoststart + idmap.Maprange
+	hoststart, _ := m.ShiftIntoNs(idMap.Hostid, idMap.Hostid)
+	hostend := hoststart + idMap.Maprange
 	return hoststart, hostend, nil
 }

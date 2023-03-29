@@ -2,10 +2,18 @@
 
 A little program to visualize uid mappings
 
-## Running
+## Building
 
-You can either use "go run mapviz", or build an executable called
-"uidmapviz" using "go build".
+Build in the usual new-style golang way:
+
+```
+git clone https://github.com/hallyn/uidmapviz
+cd uidmapviz
+go get ./...
+go build
+```
+
+## Running
 
 You can run uidmap with no arguments to show the default
 uid mapping (i.e. your first full map entry).
@@ -33,14 +41,6 @@ If a child container's mapping is not contained within the
 parent's available range, then uidmapviz will warn you.
 
 ## More details
-
-To install uidmapviz in your ~/go/bin, you can:
-
-```
-go get github.com/hallyn/uidmapviz
-cd go/src/github.com/hallyn/uidmapviz/
-go build
-```
 
 ```
 ubuntu@lxd1:~$ uidmapviz
